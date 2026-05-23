@@ -1,11 +1,13 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { analyzePlantPhoto } from '@/lib/api';
 import { PlantAnalysis } from '@/lib/mock-analysis';
 import { setLatestScan } from '@/lib/scan-store';
+import { CareTimeline, addScanToTimeline, createCareTimeline, useCareTimelines } from '@/lib/timeline-store';
 
 export default function ScannerScreen() {
   const cameraRef = useRef<CameraView>(null);
@@ -14,6 +16,12 @@ export default function ScannerScreen() {
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [availableLenses, setAvailableLenses] = useState<string[]>([]);
+  const [selectedLens, setSelectedLens] = useState<string | undefined>('builtInWideAngleCamera');
+  const [zoom, setZoom] = useState(0);
+  const [plantNickname, setPlantNickname] = useState('');
+  const [timelineMessage, setTimelineMessage] = useState<string | null>(null);
+  const timelines = useCareTimelines();
 
   async function handleAnalyze() {
     if (!cameraRef.current || isAnalyzing) {
@@ -22,6 +30,7 @@ export default function ScannerScreen() {
 
     setIsAnalyzing(true);
     setError(null);
+    setTimelineMessage(null);
 
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.75, base64: false });
@@ -43,7 +52,33 @@ export default function ScannerScreen() {
     setAnalysis(null);
     setCapturedPhotoUri(null);
     setError(null);
+    setPlantNickname('');
+    setTimelineMessage(null);
     setLatestScan(null);
+  }
+
+  async function handleCreateTimeline() {
+    if (!analysis || !capturedPhotoUri) {
+      return;
+    }
+
+    const timeline = await createCareTimeline(
+      plantNickname || analysis.plant.commonName,
+      analysis,
+      capturedPhotoUri,
+    );
+    setTimelineMessage(`${timeline.nickname} is now being monitored.`);
+  }
+
+  async function handleAddToTimeline(timelineId: string) {
+    if (!analysis || !capturedPhotoUri) {
+      return;
+    }
+
+    const timeline = await addScanToTimeline(timelineId, analysis, capturedPhotoUri);
+    if (timeline) {
+      setTimelineMessage(`Saved this scan to ${timeline.nickname}.`);
+    }
   }
 
   if (!permission) {
@@ -77,7 +112,20 @@ export default function ScannerScreen() {
       {capturedPhotoUri ? (
         <Image source={{ uri: capturedPhotoUri }} style={styles.capturedImage} />
       ) : (
-        <CameraView ref={cameraRef} facing="back" style={StyleSheet.absoluteFill} />
+        <CameraView
+          ref={cameraRef}
+          facing="back"
+          selectedLens={selectedLens}
+          zoom={zoom}
+          onAvailableLensesChanged={(event) => {
+            const lenses = event.lenses;
+            setAvailableLenses(lenses);
+            if (!selectedLens || !lenses.includes(selectedLens)) {
+              setSelectedLens(lenses.includes('builtInWideAngleCamera') ? 'builtInWideAngleCamera' : lenses[0]);
+            }
+          }}
+          style={StyleSheet.absoluteFill}
+        />
       )}
       <View style={styles.scrim} />
 
@@ -90,11 +138,21 @@ export default function ScannerScreen() {
         )}
 
         {!capturedPhotoUri && (
-          <View style={styles.focusGuide}>
-            <View style={[styles.corner, styles.cornerTopLeft]} />
-            <View style={[styles.corner, styles.cornerTopRight]} />
-            <View style={[styles.corner, styles.cornerBottomLeft]} />
-            <View style={[styles.corner, styles.cornerBottomRight]} />
+          <View style={styles.cameraControlsArea}>
+            <View style={styles.focusGuide}>
+              <View style={[styles.corner, styles.cornerTopLeft]} />
+              <View style={[styles.corner, styles.cornerTopRight]} />
+              <View style={[styles.corner, styles.cornerBottomLeft]} />
+              <View style={[styles.corner, styles.cornerBottomRight]} />
+            </View>
+
+            <CameraControls
+              availableLenses={availableLenses}
+              selectedLens={selectedLens}
+              zoom={zoom}
+              onSelectLens={setSelectedLens}
+              onSelectZoom={setZoom}
+            />
           </View>
         )}
 
@@ -107,6 +165,17 @@ export default function ScannerScreen() {
             <AnalysisResult analysis={analysis} />
           ) : (
             <ScanPrompt />
+          )}
+
+          {analysis && capturedPhotoUri && (
+            <TimelineCreator
+              nickname={plantNickname}
+              message={timelineMessage}
+              timelines={timelines}
+              onAddToTimeline={handleAddToTimeline}
+              onChangeNickname={setPlantNickname}
+              onCreateTimeline={handleCreateTimeline}
+            />
           )}
 
           {isAnalyzing ? null : capturedPhotoUri ? (
@@ -129,6 +198,151 @@ export default function ScannerScreen() {
       </SafeAreaView>
     </View>
   );
+}
+
+function TimelineCreator({
+  nickname,
+  message,
+  timelines,
+  onAddToTimeline,
+  onChangeNickname,
+  onCreateTimeline,
+}: {
+  nickname: string;
+  message: string | null;
+  timelines: CareTimeline[];
+  onAddToTimeline: (timelineId: string) => void;
+  onChangeNickname: (value: string) => void;
+  onCreateTimeline: () => void;
+}) {
+  const [isCreatingTimeline, setIsCreatingTimeline] = useState(false);
+  const [isChoosingPlant, setIsChoosingPlant] = useState(false);
+
+  return (
+    <View style={styles.timelineCreator}>
+      <Pressable
+        style={styles.timelineButton}
+        onPress={() => setIsCreatingTimeline((current) => !current)}>
+        <Ionicons name="calendar-outline" color="#FFFFFF" size={18} />
+        <TextBlock variant="button">Create new plant</TextBlock>
+      </Pressable>
+
+      {isCreatingTimeline && (
+        <View style={styles.timelineForm}>
+          <TextInput
+            value={nickname}
+            onChangeText={onChangeNickname}
+            placeholder="Name this plant"
+            placeholderTextColor="#7A877D"
+            style={styles.nicknameInput}
+          />
+          <Pressable
+            style={styles.timelineConfirmButton}
+            onPress={() => {
+              onCreateTimeline();
+              setIsCreatingTimeline(false);
+            }}>
+            <TextBlock variant="button">Start monitoring</TextBlock>
+          </Pressable>
+        </View>
+      )}
+
+      {timelines.length > 0 ? (
+        <Pressable
+          style={styles.timelineSecondaryButton}
+          onPress={() => setIsChoosingPlant((current) => !current)}>
+          <Ionicons name="albums-outline" color="#1F7A4D" size={18} />
+          <TextBlock variant="timelineSecondaryText">Add to existing plant</TextBlock>
+        </Pressable>
+      ) : null}
+
+      {isChoosingPlant && (
+        <View style={styles.plantPicker}>
+          {timelines.map((timeline) => (
+            <Pressable
+              key={timeline.id}
+              style={styles.plantPickerItem}
+              onPress={() => {
+                onAddToTimeline(timeline.id);
+                setIsChoosingPlant(false);
+              }}>
+              <View style={styles.plantPickerCopy}>
+                <Text style={styles.plantPickerTitle}>{timeline.nickname}</Text>
+                <Text style={styles.plantPickerMeta}>{timeline.scans.length} saved scans</Text>
+              </View>
+              <Ionicons name="chevron-forward" color="#7A877D" size={18} />
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      {message && <TextBlock variant="successText">{message}</TextBlock>}
+    </View>
+  );
+}
+
+function CameraControls({
+  availableLenses,
+  selectedLens,
+  zoom,
+  onSelectLens,
+  onSelectZoom,
+}: {
+  availableLenses: string[];
+  selectedLens?: string;
+  zoom: number;
+  onSelectLens: (lens: string) => void;
+  onSelectZoom: (zoom: number) => void;
+}) {
+  const visibleLenses = availableLenses.filter((lens) =>
+    ['builtInUltraWideCamera', 'builtInWideAngleCamera', 'builtInTelephotoCamera'].includes(lens),
+  );
+
+  return (
+    <View style={styles.cameraControls}>
+      {visibleLenses.length > 1 && (
+        <View style={styles.controlGroup}>
+          {visibleLenses.map((lens) => (
+            <Pressable
+              key={lens}
+              style={[styles.controlChip, selectedLens === lens && styles.controlChipSelected]}
+              onPress={() => onSelectLens(lens)}>
+              <Text style={[styles.controlText, selectedLens === lens && styles.controlTextSelected]}>
+                {getLensLabel(lens)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.controlGroup}>
+        {[
+          { label: '1x', value: 0 },
+          { label: '1.5x', value: 0.16 },
+          { label: '2x', value: 0.28 },
+        ].map((option) => (
+          <Pressable
+            key={option.label}
+            style={[styles.controlChip, zoom === option.value && styles.controlChipSelected]}
+            onPress={() => onSelectZoom(option.value)}>
+            <Text style={[styles.controlText, zoom === option.value && styles.controlTextSelected]}>
+              {option.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function getLensLabel(lens: string) {
+  if (lens.includes('UltraWide')) {
+    return '0.5x';
+  }
+  if (lens.includes('Telephoto')) {
+    return '2x';
+  }
+  return '1x';
 }
 
 function AnalyzingState() {
@@ -169,9 +383,7 @@ function AnalysisResult({ analysis }: { analysis: PlantAnalysis }) {
     <View style={styles.resultContent}>
       <View style={styles.resultHeader}>
         <TextBlock variant="sectionTitle">{analysis.plant.commonName}</TextBlock>
-        <TextBlock variant="muted">
-          {analysis.plant.scientificName} - {Math.round(analysis.plant.confidence * 100)}% match
-        </TextBlock>
+        <TextBlock variant="muted">{analysis.plant.scientificName}</TextBlock>
       </View>
 
       <View style={styles.statusRow}>
@@ -198,6 +410,8 @@ function TextBlock({
     | 'pill'
     | 'sectionTitle'
     | 'secondaryButtonText'
+    | 'successText'
+    | 'timelineSecondaryText'
     | 'title';
 }) {
   const textStyle = [styles.text, styles[variant]];
@@ -256,6 +470,40 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     aspectRatio: 0.78,
   },
+  cameraControlsArea: {
+    alignItems: 'center',
+    gap: 18,
+  },
+  cameraControls: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  controlGroup: {
+    flexDirection: 'row',
+    gap: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(7, 19, 13, 0.58)',
+    padding: 6,
+  },
+  controlChip: {
+    minWidth: 54,
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  controlChipSelected: {
+    backgroundColor: '#F5FAF4',
+  },
+  controlText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  controlTextSelected: {
+    color: '#102015',
+  },
   corner: {
     position: 'absolute',
     width: 44,
@@ -291,6 +539,86 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     backgroundColor: 'rgba(250, 255, 248, 0.94)',
+  },
+  timelineCreator: {
+    gap: 10,
+  },
+  timelineForm: {
+    gap: 10,
+  },
+  nicknameInput: {
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: '#D8E2D7',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    color: '#102015',
+    fontSize: 15,
+    paddingHorizontal: 12,
+  },
+  timelineButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 8,
+    backgroundColor: '#245B40',
+    paddingHorizontal: 16,
+  },
+  timelineConfirmButton: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#1F7A4D',
+    paddingHorizontal: 16,
+  },
+  timelineSecondaryButton: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1F7A4D',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+  },
+  plantPicker: {
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#D8E2D7',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  plantPickerItem: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ECF1EB',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  plantPickerCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  plantPickerTitle: {
+    color: '#102015',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  plantPickerMeta: {
+    color: '#536257',
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0,
   },
   prompt: {
     gap: 8,
@@ -384,6 +712,18 @@ const styles = StyleSheet.create({
     color: '#1F7A4D',
     fontSize: 15,
     lineHeight: 20,
+    fontWeight: '700',
+  },
+  timelineSecondaryText: {
+    color: '#1F7A4D',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  successText: {
+    color: '#1F7A4D',
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: '700',
   },
   pillWrap: {

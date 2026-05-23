@@ -41,6 +41,22 @@ def predict_leaf_health(image_bytes: bytes):
             "signals": symptom_scores,
         }
 
+    if predicted_class == "yellowing":
+        return {
+            "status": "unhealthy",
+            "condition": "yellowing leaves",
+            "confidence": confidence,
+            "signals": symptom_scores,
+        }
+
+    if predicted_class == "other_unhealthy":
+        return {
+            "status": "unhealthy",
+            "condition": "unhealthy leaves",
+            "confidence": confidence,
+            "signals": symptom_scores,
+        }
+
     return {
         "status": "unhealthy",
         "condition": "unhealthy leaves",
