@@ -101,6 +101,7 @@ function TimelineDashboard({ timeline, onBack }: { timeline: CareTimeline; onBac
   const [draftName, setDraftName] = useState(timeline.nickname);
   const [isEditing, setIsEditing] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const shouldShowDiagnostics = latestScan ? isUnhealthyScan(latestScan) : false;
 
   async function handleSaveName() {
     const renamedTimeline = await renameCareTimeline(timeline.id, draftName);
@@ -181,6 +182,10 @@ function TimelineDashboard({ timeline, onBack }: { timeline: CareTimeline; onBac
 
         {latestScan && <TimelineStatus scan={latestScan} />}
 
+        {latestScan && shouldShowDiagnostics && (
+          <DiagnosticAssistant plantName={timeline.nickname} scan={latestScan} />
+        )}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Care timeline</Text>
           {timeline.tasks.map((task) => (
@@ -199,6 +204,192 @@ function TimelineDashboard({ timeline, onBack }: { timeline: CareTimeline; onBac
       </SafeAreaView>
     </ScrollView>
   );
+}
+
+type DiagnosticAnswers = {
+  light?: string;
+  pattern?: string;
+  pests?: string;
+  soil?: string;
+};
+
+const diagnosticQuestions = [
+  {
+    id: 'soil',
+    title: 'How does the soil usually feel?',
+    options: [
+      { label: 'Wet often', value: 'wet' },
+      { label: 'Dry quickly', value: 'dry' },
+      { label: 'Balanced', value: 'balanced' },
+    ],
+  },
+  {
+    id: 'light',
+    title: 'What light does it get?',
+    options: [
+      { label: 'Low light', value: 'low' },
+      { label: 'Bright indirect', value: 'bright' },
+      { label: 'Direct sun', value: 'direct' },
+    ],
+  },
+  {
+    id: 'pattern',
+    title: 'Where is yellowing most visible?',
+    options: [
+      { label: 'Lower leaves', value: 'lower' },
+      { label: 'New growth', value: 'new' },
+      { label: 'Spots or patches', value: 'spots' },
+    ],
+  },
+  {
+    id: 'pests',
+    title: 'Any pests, webbing, or sticky leaves?',
+    options: [
+      { label: 'Yes', value: 'yes' },
+      { label: 'No', value: 'no' },
+      { label: 'Not sure', value: 'unknown' },
+    ],
+  },
+] as const;
+
+function DiagnosticAssistant({ plantName, scan }: { plantName: string; scan: TimelineScan }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [answers, setAnswers] = useState<DiagnosticAnswers>({});
+  const explanation = getDiagnosticExplanation(answers, scan);
+  const answeredCount = Object.keys(answers).length;
+
+  return (
+    <View style={styles.diagnosticCard}>
+      <View style={styles.diagnosticHeader}>
+        <View style={styles.diagnosticCopy}>
+          <Text style={styles.cardLabel}>Yellowing check</Text>
+          <Text style={styles.diagnosticTitle}>Find a likely cause</Text>
+          <Text style={styles.body}>
+            Answer quick care questions for a possible explanation for {plantName}.
+          </Text>
+        </View>
+        <Pressable style={styles.diagnosticButton} onPress={() => setIsOpen((current) => !current)}>
+          <Ionicons name={isOpen ? 'close' : 'help-buoy-outline'} color="#FFFFFF" size={18} />
+          <Text style={styles.diagnosticButtonText}>{isOpen ? 'Close' : 'Diagnose'}</Text>
+        </Pressable>
+      </View>
+
+      {isOpen && (
+        <View style={styles.diagnosticBody}>
+          {diagnosticQuestions.map((question) => (
+            <View key={question.id} style={styles.questionBlock}>
+              <Text style={styles.questionTitle}>{question.title}</Text>
+              <View style={styles.answerChips}>
+                {question.options.map((option) => {
+                  const selected = answers[question.id] === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      style={[styles.answerChip, selected && styles.answerChipSelected]}
+                      onPress={() =>
+                        setAnswers((current) => ({
+                          ...current,
+                          [question.id]: option.value,
+                        }))
+                      }>
+                      <Text style={[styles.answerText, selected && styles.answerTextSelected]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
+
+          <View style={styles.explanationCard}>
+            <Text style={styles.explanationLabel}>
+              {answeredCount === diagnosticQuestions.length ? 'Possible explanation' : 'Early read'}
+            </Text>
+            <Text style={styles.explanationTitle}>{explanation.title}</Text>
+            <Text style={styles.body}>{explanation.detail}</Text>
+            <Text style={styles.nextStepText}>{explanation.nextStep}</Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function getDiagnosticExplanation(answers: DiagnosticAnswers, scan: TimelineScan) {
+  if (answers.pests === 'yes' || answers.pattern === 'spots') {
+    return {
+      title: 'Pest stress or leaf damage is possible',
+      detail:
+        'Spots, patchy yellowing, webbing, or sticky residue can point to pests or damaged tissue rather than a simple watering issue.',
+      nextStep: 'Check leaf undersides closely, isolate the plant if pests are visible, and wipe leaves before rescanning.',
+    };
+  }
+
+  if (answers.soil === 'wet') {
+    return {
+      title: 'Overwatering or poor drainage is likely',
+      detail:
+        'Yellowing leaves with soil that stays wet often means roots are not getting enough oxygen, especially for pothos and similar houseplants.',
+      nextStep: 'Pause watering, confirm the pot drains, and water again only when the top soil dries.',
+    };
+  }
+
+  if (answers.soil === 'dry') {
+    return {
+      title: 'Underwatering stress is possible',
+      detail:
+        'If soil dries out quickly, leaves can yellow as the plant sheds older growth or struggles to keep moisture consistent.',
+      nextStep: 'Water thoroughly, let excess drain, and compare a progress photo after several days.',
+    };
+  }
+
+  if (answers.light === 'direct') {
+    return {
+      title: 'Too much direct sun may be stressing leaves',
+      detail:
+        'Direct light can bleach or yellow indoor plant leaves, especially if the plant was previously kept in softer light.',
+      nextStep: 'Move it to bright indirect light and track whether new yellowing slows.',
+    };
+  }
+
+  if (answers.light === 'low') {
+    return {
+      title: 'Low light could be slowing growth',
+      detail:
+        'Lower leaves may yellow when a plant is not getting enough light to support all of its foliage.',
+      nextStep: 'Move closer to a window with bright indirect light and avoid increasing watering at the same time.',
+    };
+  }
+
+  if (answers.pattern === 'lower') {
+    return {
+      title: 'Older leaf shedding may be normal',
+      detail:
+        'If mostly lower older leaves are yellowing and the rest of the plant looks steady, it may be normal aging or a mild care imbalance.',
+      nextStep: 'Remove fully yellow leaves and watch whether yellowing spreads to newer growth.',
+    };
+  }
+
+  if (scan.condition === 'yellowing leaves') {
+    return {
+      title: 'Most common causes are water or light imbalance',
+      detail:
+        'Yellowing is a symptom with several possible causes. The care answers will narrow whether watering, drainage, light, or pests are more likely.',
+      nextStep: 'Answer the questions above, then take another progress scan after the care change.',
+    };
+  }
+
+  return {
+    title: 'Care stress is possible',
+    detail:
+      'The latest scan is not marked healthy, so use the questions to narrow whether the issue looks like pests, water stress, or light stress.',
+    nextStep: 'Inspect the leaves, stabilize watering and light, then save a follow-up scan to compare.',
+  };
+}
+
+function isUnhealthyScan(scan: TimelineScan) {
+  return scan.healthStatus !== 'healthy' || scan.condition !== 'healthy';
 }
 
 function SingleScanCare({ analysis, photoUri }: { analysis: PlantAnalysis; photoUri: string }) {
@@ -533,6 +724,109 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 0,
+  },
+  diagnosticCard: {
+    gap: 14,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+  },
+  diagnosticHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  diagnosticCopy: {
+    flex: 1,
+    gap: 5,
+  },
+  diagnosticTitle: {
+    color: '#102015',
+    fontSize: 19,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  diagnosticButton: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: 8,
+    backgroundColor: '#245B40',
+    paddingHorizontal: 12,
+  },
+  diagnosticButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  diagnosticBody: {
+    gap: 14,
+  },
+  questionBlock: {
+    gap: 8,
+  },
+  questionTitle: {
+    color: '#102015',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  answerChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  answerChip: {
+    borderWidth: 1,
+    borderColor: '#D8E2D7',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  answerChipSelected: {
+    borderColor: '#1F7A4D',
+    backgroundColor: '#E5F7E7',
+  },
+  answerText: {
+    color: '#536257',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  answerTextSelected: {
+    color: '#1F7A4D',
+  },
+  explanationCard: {
+    gap: 7,
+    borderLeftWidth: 4,
+    borderLeftColor: '#D4A017',
+    borderRadius: 8,
+    backgroundColor: '#FFF8E5',
+    padding: 14,
+  },
+  explanationLabel: {
+    color: '#7A5A0A',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  explanationTitle: {
+    color: '#102015',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  nextStepText: {
+    color: '#5D4212',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 20,
   },
   row: {
     gap: 6,
