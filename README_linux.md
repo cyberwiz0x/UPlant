@@ -94,7 +94,7 @@ Backend:
 
 ```console
 cd /path/to/UPlant
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python3 -m ensurepip --upgrade
 python3 -m pip install --upgrade pip
@@ -117,9 +117,9 @@ train it locally before running the full demo:
 ```console
 cd /path/to/UPlant/UPlant
 source .venv/bin/activate
-python -m pip install -r ml/requirements.txt
-python ml/download_dataset.py
-python ml/train_health_model.py "/home/yourusername/.cache/kagglehub/datasets/gauravsaklani00/indoor-plant-leaf-health-dataset/versions/1/indoor-plant-dataset"
+python3 -m pip install -r ml/requirements.txt
+python3 ml/download_dataset.py
+python3 ml/train_health_model.py "/home/yourusername/.cache/kagglehub/datasets/gauravsaklani00/indoor-plant-leaf-health-dataset/versions/1/indoor-plant-dataset"
 deactivate
 ```
 
@@ -157,7 +157,7 @@ npx expo start -c
 ## Test Pl@ntNet With A Local Photo
 
 ```console
-./.venv/bin/python backend/test_plant_id.py /path/to/plant-photo.jpg
+./.venv/bin/python3 backend/test_plant_id.py /path/to/plant-photo.jpg
 ```
 
 Expected output:
@@ -172,8 +172,8 @@ Download and inspect the Kaggle healthy-vs-unhealthy leaf dataset:
 
 ```console
 source .venv/bin/activate
-python.exe -m pip install -r ml/requirements.txt
-python.exe ml/download_dataset.py
+python3 -m pip install -r ml/requirements.txt
+python3 ml/download_dataset.py
 deactivate
 ```
 
