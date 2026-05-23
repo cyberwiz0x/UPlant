@@ -9,6 +9,8 @@ import { PlantAnalysis } from '@/lib/mock-analysis';
 import { setLatestScan } from '@/lib/scan-store';
 import { CareTimeline, addScanToTimeline, createCareTimeline, useCareTimelines } from '@/lib/timeline-store';
 
+import * as ImagePicker from 'expo-image-picker';
+
 export default function ScannerScreen() {
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -41,6 +43,40 @@ export default function ScannerScreen() {
       const result = await analyzePlantPhoto(photo.uri);
       setAnalysis(result);
       setLatestScan({ analysis: result, photoUri: photo.uri });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Analysis failed.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function handlePickFromLibrary() {
+    if (isAnalyzing) return;
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      setError('Photo library access is required to upload a photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1.00,
+      base64: false,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+
+    const uri = result.assets[0].uri;
+    setIsAnalyzing(true);
+    setError(null);
+    setTimelineMessage(null);
+    setCapturedPhotoUri(uri);
+
+    try {
+      const analysisResult = await analyzePlantPhoto(uri);
+      setAnalysis(analysisResult);
+      setLatestScan({ analysis: analysisResult, photoUri: uri });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Analysis failed.');
     } finally {
@@ -183,16 +219,22 @@ export default function ScannerScreen() {
               <TextBlock variant="secondaryButtonText">Take another photo</TextBlock>
             </Pressable>
           ) : (
-            <Pressable
-              style={[styles.primaryButton, isAnalyzing && styles.disabledButton]}
-              onPress={handleAnalyze}
-              disabled={isAnalyzing}>
-              {isAnalyzing ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
+            <View style={styles.captureRow}>
+              <Pressable
+                style={[styles.primaryButton, styles.captureRowMain, isAnalyzing && styles.disabledButton]}
+                onPress={handleAnalyze}
+                disabled={isAnalyzing}>
+                <Ionicons name="camera-outline" color="#FFFFFF" size={20} />
                 <TextBlock variant="button">Take photo</TextBlock>
-              )}
-            </Pressable>
+              </Pressable>
+
+              <Pressable
+                style={[styles.secondaryButton, styles.captureRowAlt]}
+                onPress={handlePickFromLibrary}
+                disabled={isAnalyzing}>
+                <Ionicons name="images-outline" color="#1F7A4D" size={20} />
+              </Pressable>
+            </View>
           )}
         </View>
       </SafeAreaView>
@@ -430,6 +472,17 @@ const styles = StyleSheet.create({
   capturedImage: {
     ...StyleSheet.absoluteFillObject,
     resizeMode: 'cover',
+  },
+  captureRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  captureRowMain: {
+    flex: 1,
+  },
+  captureRowAlt: {
+    width: 52,
+    paddingHorizontal: 0,
   },
   centered: {
     flex: 1,
