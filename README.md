@@ -10,12 +10,14 @@ What works now:
 - The phone camera captures a plant photo.
 - The app sends the photo to the FastAPI backend.
 - The backend calls Pl@ntNet and returns a real plant identification.
+- The backend can load a trained healthy-vs-unhealthy TensorFlow model from `models/leaf-health`.
 - The backend returns rule-based care advice.
 
-What is still mocked:
+What still needs work:
 
-- Leaf health classification is currently hardcoded in `backend/services/health_model.py`.
-- The next ML step is training a model on the Kaggle indoor plant disease dataset and replacing that mock.
+- If `models/leaf-health` is missing, the backend returns a `model not trained` fallback.
+- The current model only predicts `healthy` vs `unhealthy`.
+- Detailed symptom diagnosis, such as yellowing, brown edges, spots, or pests, is a later model upgrade.
 
 Current live pipeline:
 
@@ -23,7 +25,7 @@ Current live pipeline:
 phone camera
 -> FastAPI /analyze
 -> real Pl@ntNet plant identification
--> mocked leaf health label
+-> trained healthy/unhealthy leaf model, if available
 -> rule-based care advice
 -> Expo result screen
 ```
@@ -104,6 +106,26 @@ cd C:\path\to\UPlant\UPlant
 npm install --legacy-peer-deps
 ```
 
+## Train The Leaf Health Model
+
+The trained model is intentionally not committed because `models/` is ignored. Each teammate should
+train it locally before running the full demo:
+
+```powershell
+cd C:\path\to\UPlant
+.\.venv\Scripts\python.exe -m pip install -r ml\requirements.txt
+.\.venv\Scripts\python.exe ml\download_dataset.py
+.\.venv\Scripts\python.exe ml\train_health_model.py "C:\Users\YOUR_USER\.cache\kagglehub\datasets\gauravsaklani00\indoor-plant-leaf-health-dataset\versions\1\indoor-plant-dataset"
+```
+
+The training command creates:
+
+```text
+models/leaf-health/
+```
+
+Restart the backend after training so `/analyze` loads the new model.
+
 ## Run The Demo
 
 Terminal 1, from repo root:
@@ -141,7 +163,7 @@ Expected output:
 
 ## ML Next Step
 
-Download and inspect the Kaggle dataset:
+Download and inspect the Kaggle healthy-vs-unhealthy leaf dataset:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r ml\requirements.txt
@@ -151,9 +173,8 @@ Download and inspect the Kaggle dataset:
 Then map the dataset folders into app-friendly labels like:
 
 - `healthy`
-- `yellowing leaves`
-- `brown leaf edges`
-- `leaf spots`
-- `pest damage`
+- `unhealthy leaves`
 
-After training, replace `backend/services/health_model.py` so `/analyze` returns a real model prediction.
+After training, restart the backend so `/analyze` loads the model from `models/leaf-health`.
+More detailed labels like `yellowing leaves`, `brown leaf edges`, `leaf spots`, and `pest damage`
+can come after the binary model works.

@@ -4,3 +4,6 @@ python-multipart==0.0.20
 requests==2.32.3
 pydantic==2.10.4
 python-dotenv==1.0.1
+tensorflow==2.18.0
+pillow==11.0.0
+numpy==2.0.2

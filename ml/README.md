@@ -1,64 +1,121 @@
 # UPlant ML
 
-Training workspace for the Kaggle indoor plant disease detection dataset.
+Training workspace for the leaf health classifier.
 
-## Bit 2 goal
+## First ML Goal
 
-Inspect the dataset folder names and decide the final class labels. The health model should start
-simple:
-
-- `healthy`
-- `yellowing leaves`
-- `brown leaf edges`
-- `leaf spots`
-- `pest damage`
-- `other issue`
-
-If the Kaggle dataset uses more specific labels, map them into these demo-friendly categories.
-
-## Download with KaggleHub
-
-From `C:\Users\primi\OneDrive\Desktop\code\UPlant`:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r ml\requirements.txt
-python ml\download_dataset.py
-```
-
-The script prints the local Kaggle cache path plus image counts for each folder. That folder path is
-what you pass into training later.
-
-## Download as zip
-
-If you download a zip from Kaggle instead, unzip it somewhere like:
+Use the Kaggle healthy-vs-unhealthy indoor plant leaf dataset:
 
 ```text
-C:\Users\primi\OneDrive\Desktop\code\UPlant\data\indoor-plant-disease-detection
+gauravsaklani00/indoor-plant-leaf-health-dataset
 ```
 
-Then inspect the folders:
+This is a better first model than detailed disease diagnosis because the app currently needs a
+simple live health signal:
+
+```text
+leaf image -> healthy / unhealthy
+```
+
+Later, we can upgrade from binary health classification to symptom classes such as yellowing,
+brown edges, leaf spots, or pest damage.
+
+## Download With KaggleHub
+
+From the repo root:
 
 ```powershell
-Get-ChildItem data\indoor-plant-disease-detection -Directory -Recurse -Depth 4
+.\.venv\Scripts\python.exe -m pip install -r ml\requirements.txt
+.\.venv\Scripts\python.exe ml\download_dataset.py
 ```
 
-## Bit 3 goal
+The script defaults to:
 
-Train a transfer-learning image classifier:
+```text
+gauravsaklani00/indoor-plant-leaf-health-dataset
+```
 
-- MobileNetV2 or EfficientNetB0
-- 224x224 input images
-- train/validation split
-- export saved model for the backend
+It prints the local Kaggle cache path plus image counts for each folder.
 
-The backend contract expects:
+## Inspect Another Dataset
+
+To inspect the older disease dataset instead:
+
+```powershell
+.\.venv\Scripts\python.exe ml\download_dataset.py --dataset abdulahad0296/indoor-plant-disease-detection-dataset
+```
+
+## Train Baseline Model
+
+After the downloader prints the dataset path, run:
+
+```powershell
+.\.venv\Scripts\python.exe ml\train_health_model.py "PASTE_DATASET_PATH_HERE"
+```
+
+## Optional: Add Roboflow YOLO Crops
+
+This is experimental. In local testing, the Roboflow crops made the model more aggressive about
+predicting `unhealthy` on real houseplant photos, so the recommended demo model is Kaggle-only.
+
+If you still want to experiment, download the Roboflow healthy/unhealthy dataset as YOLOv8 and
+unzip it under:
+
+```text
+data/roboflow-healthy-unhealthy
+```
+
+Convert YOLO bounding boxes into classifier crops:
+
+```powershell
+.\.venv\Scripts\python.exe ml\crop_yolo_dataset.py data\roboflow-healthy-unhealthy --output-dir data\leaf-health-crops
+```
+
+Merge the Roboflow crops with the Kaggle classification dataset:
+
+```powershell
+.\.venv\Scripts\python.exe ml\merge_classification_datasets.py --output-dir data\leaf-health-combined data\leaf-health-crops "C:\Users\primi\.cache\kagglehub\datasets\gauravsaklani00\indoor-plant-leaf-health-dataset\versions\1\indoor-plant-dataset"
+```
+
+Retrain on the combined dataset:
+
+```powershell
+.\.venv\Scripts\python.exe ml\train_health_model.py data\leaf-health-combined
+```
+
+The script trains MobileNetV2 transfer learning and exports:
+
+```text
+models/leaf-health/
+  classes.txt
+  saved_model files
+```
+
+## Backend Contract
+
+The backend expects `backend/services/health_model.py` to return:
 
 ```json
 {
-  "status": "mild issue",
-  "condition": "yellowing leaves",
-  "confidence": 0.84
+  "status": "healthy",
+  "condition": "healthy",
+  "confidence": 0.92
 }
 ```
+
+or:
+
+```json
+{
+  "status": "unhealthy",
+  "condition": "unhealthy leaves",
+  "confidence": 0.86
+}
+```
+
+For the demo, care advice can map `unhealthy leaves` to broad guidance:
+
+- check watering and drainage
+- inspect undersides of leaves for pests
+- move to bright indirect light
+- track new yellowing, brown edges, and spots

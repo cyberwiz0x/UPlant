@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
 import { useColorScheme } from 'react-native';
 
@@ -18,8 +19,24 @@ export default function AppTabs() {
           borderTopColor: colors.backgroundElement,
         },
       }}>
-      <Tabs.Screen name="index" options={{ title: 'Scan' }} />
-      <Tabs.Screen name="explore" options={{ title: 'Care' }} />
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Scan',
+          tabBarIcon: ({ color, focused, size }) => (
+            <Ionicons name={focused ? 'scan' : 'scan-outline'} color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="explore"
+        options={{
+          title: 'Care',
+          tabBarIcon: ({ color, focused, size }) => (
+            <Ionicons name={focused ? 'leaf' : 'leaf-outline'} color={color} size={size} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

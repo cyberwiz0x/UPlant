@@ -26,6 +26,33 @@ CARE_RULES = {
         ],
         "track": ["new spots", "spot size", "watering dates", "nearby plant symptoms"],
     },
+    "unhealthy leaves": {
+        "diagnosis": "The leaf looks stressed or unhealthy, but the model is not assigning a specific disease yet.",
+        "fixes": [
+            "Check soil moisture before watering again.",
+            "Inspect the undersides of leaves for pests.",
+            "Move the plant to bright indirect light.",
+            "Remove badly damaged leaves if they keep declining.",
+        ],
+        "track": ["watering dates", "soil moisture", "new yellowing", "brown edges", "new spots"],
+    },
+    "model not trained": {
+        "diagnosis": "The health model is not available yet on this machine.",
+        "fixes": [
+            "Train the healthy-vs-unhealthy model from the Kaggle dataset.",
+            "Confirm models/leaf-health exists before starting the backend.",
+        ],
+        "track": ["model folder", "classes.txt", "backend logs"],
+    },
+    "uncertain leaf health": {
+        "diagnosis": "The health result is uncertain. A closer, well-lit leaf photo will give a better read.",
+        "fixes": [
+            "Move closer so one leaf fills most of the frame.",
+            "Use neutral or daylight lighting if possible.",
+            "Avoid shadows, glare, and busy backgrounds.",
+        ],
+        "track": ["clear leaf photo", "lighting", "soil moisture", "new yellowing or browning"],
+    },
     "healthy": {
         "diagnosis": "The visible leaves look healthy.",
         "fixes": [

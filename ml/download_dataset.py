@@ -3,7 +3,7 @@ from pathlib import Path
 
 import kagglehub
 
-DATASET_HANDLE = "abdulahad0296/indoor-plant-disease-detection-dataset"
+DEFAULT_DATASET_HANDLE = "gauravsaklani00/indoor-plant-leaf-health-dataset"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
@@ -19,8 +19,9 @@ def count_images_by_folder(dataset_path: Path):
     return counts
 
 
-def main():
-    path = Path(kagglehub.dataset_download(DATASET_HANDLE))
+def main(dataset_handle: str = DEFAULT_DATASET_HANDLE):
+    path = Path(kagglehub.dataset_download(dataset_handle))
+    print(f"Dataset: {dataset_handle}")
     print(f"Path to dataset files: {path}")
 
     counts = count_images_by_folder(path)
@@ -34,4 +35,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset",
+        default=DEFAULT_DATASET_HANDLE,
+        help="Kaggle dataset handle to download",
+    )
+    args = parser.parse_args()
+    main(args.dataset)

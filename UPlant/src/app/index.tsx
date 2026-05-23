@@ -1,18 +1,18 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { analyzePlantPhoto } from '@/lib/api';
 import { PlantAnalysis } from '@/lib/mock-analysis';
-
-const EMPTY_TRACKERS = ['watering date', 'soil moisture', 'new yellowing', 'new brown edges'];
+import { setLatestScan } from '@/lib/scan-store';
 
 export default function ScannerScreen() {
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleAnalyze() {
@@ -28,13 +28,22 @@ export default function ScannerScreen() {
       if (!photo?.uri) {
         throw new Error('Camera did not return a photo URI.');
       }
+      setCapturedPhotoUri(photo.uri);
       const result = await analyzePlantPhoto(photo.uri);
       setAnalysis(result);
+      setLatestScan({ analysis: result, photoUri: photo.uri });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Analysis failed.');
     } finally {
       setIsAnalyzing(false);
     }
+  }
+
+  function handleRetake() {
+    setAnalysis(null);
+    setCapturedPhotoUri(null);
+    setError(null);
+    setLatestScan(null);
   }
 
   if (!permission) {
@@ -65,40 +74,71 @@ export default function ScannerScreen() {
 
   return (
     <View style={styles.screen}>
-      <CameraView ref={cameraRef} facing="back" style={StyleSheet.absoluteFill} />
+      {capturedPhotoUri ? (
+        <Image source={{ uri: capturedPhotoUri }} style={styles.capturedImage} />
+      ) : (
+        <CameraView ref={cameraRef} facing="back" style={StyleSheet.absoluteFill} />
+      )}
       <View style={styles.scrim} />
 
       <SafeAreaView style={styles.overlay}>
-        <View style={styles.header}>
-          <TextBlock variant="eyebrow">UPlant live scan</TextBlock>
-          <TextBlock variant="title">Frame a leaf clearly.</TextBlock>
-          <TextBlock>
-            Start with the whole plant, then move close to a leaf for the health check.
-          </TextBlock>
-        </View>
+        {!capturedPhotoUri && (
+          <View style={styles.header}>
+            <TextBlock variant="eyebrow">Plant Analysis</TextBlock>
+            <TextBlock variant="title">Frame a leaf clearly.</TextBlock>
+          </View>
+        )}
 
-        <View style={styles.focusGuide}>
-          <View style={[styles.corner, styles.cornerTopLeft]} />
-          <View style={[styles.corner, styles.cornerTopRight]} />
-          <View style={[styles.corner, styles.cornerBottomLeft]} />
-          <View style={[styles.corner, styles.cornerBottomRight]} />
-        </View>
+        {!capturedPhotoUri && (
+          <View style={styles.focusGuide}>
+            <View style={[styles.corner, styles.cornerTopLeft]} />
+            <View style={[styles.corner, styles.cornerTopRight]} />
+            <View style={[styles.corner, styles.cornerBottomLeft]} />
+            <View style={[styles.corner, styles.cornerBottomRight]} />
+          </View>
+        )}
 
         <View style={styles.bottomPanel}>
-          {error ? <ErrorState message={error} /> : analysis ? <AnalysisResult analysis={analysis} /> : <ScanPrompt />}
+          {isAnalyzing ? (
+            <AnalyzingState />
+          ) : error ? (
+            <ErrorState message={error} />
+          ) : analysis ? (
+            <AnalysisResult analysis={analysis} />
+          ) : (
+            <ScanPrompt />
+          )}
 
-          <Pressable
-            style={[styles.primaryButton, isAnalyzing && styles.disabledButton]}
-            onPress={handleAnalyze}
-            disabled={isAnalyzing}>
-            {isAnalyzing ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <TextBlock variant="button">{analysis ? 'Scan again' : 'Identify and check health'}</TextBlock>
-            )}
-          </Pressable>
+          {isAnalyzing ? null : capturedPhotoUri ? (
+            <Pressable style={styles.secondaryButton} onPress={handleRetake}>
+              <TextBlock variant="secondaryButtonText">Take another photo</TextBlock>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.primaryButton, isAnalyzing && styles.disabledButton]}
+              onPress={handleAnalyze}
+              disabled={isAnalyzing}>
+              {isAnalyzing ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <TextBlock variant="button">Take photo</TextBlock>
+              )}
+            </Pressable>
+          )}
         </View>
       </SafeAreaView>
+    </View>
+  );
+}
+
+function AnalyzingState() {
+  return (
+    <View style={styles.analyzing}>
+      <ActivityIndicator color="#1F7A4D" />
+      <View style={styles.prompt}>
+        <TextBlock variant="sectionTitle">Analyzing</TextBlock>
+        <TextBlock>Identifying plant and leaf health.</TextBlock>
+      </View>
     </View>
   );
 }
@@ -106,10 +146,9 @@ export default function ScannerScreen() {
 function ScanPrompt() {
   return (
     <View style={styles.prompt}>
-      <TextBlock variant="sectionTitle">Ready for the first slice</TextBlock>
+      <TextBlock variant="sectionTitle">Plant Photo Analysis</TextBlock>
       <TextBlock>
-        This screen captures a camera frame, sends it to the backend, identifies the plant with
-        Pl@ntNet, and returns starter leaf-care guidance.
+        Place plant in frame and take a photo for identification and care guidance.
       </TextBlock>
     </View>
   );
@@ -127,7 +166,7 @@ function ErrorState({ message }: { message: string }) {
 
 function AnalysisResult({ analysis }: { analysis: PlantAnalysis }) {
   return (
-    <ScrollView style={styles.resultScroll} contentContainerStyle={styles.resultContent}>
+    <View style={styles.resultContent}>
       <View style={styles.resultHeader}>
         <TextBlock variant="sectionTitle">{analysis.plant.commonName}</TextBlock>
         <TextBlock variant="muted">
@@ -140,16 +179,8 @@ function AnalysisResult({ analysis }: { analysis: PlantAnalysis }) {
         <TextBlock variant="muted">{Math.round(analysis.health.confidence * 100)}% confidence</TextBlock>
       </View>
 
-      <TextBlock variant="sectionTitle">{analysis.care.diagnosis}</TextBlock>
-      {analysis.care.fixes.map((fix) => (
-        <TextBlock key={fix}>- {fix}</TextBlock>
-      ))}
-
-      <TextBlock variant="sectionTitle">Track this week</TextBlock>
-      {(analysis.care.track.length ? analysis.care.track : EMPTY_TRACKERS).map((item) => (
-        <TextBlock key={item}>- {item}</TextBlock>
-      ))}
-    </ScrollView>
+      <TextBlock variant="muted">Open the Care tab for fixes and what to track.</TextBlock>
+    </View>
   );
 }
 
@@ -158,7 +189,16 @@ function TextBlock({
   variant = 'body',
 }: {
   children: React.ReactNode;
-  variant?: 'body' | 'button' | 'eyebrow' | 'muted' | 'pill' | 'sectionTitle' | 'title';
+  variant?:
+    | 'body'
+    | 'button'
+    | 'eyebrow'
+    | 'muted'
+    | 'overlayBody'
+    | 'pill'
+    | 'sectionTitle'
+    | 'secondaryButtonText'
+    | 'title';
 }) {
   const textStyle = [styles.text, styles[variant]];
   return (
@@ -172,6 +212,10 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#07130D',
+  },
+  capturedImage: {
+    ...StyleSheet.absoluteFillObject,
+    resizeMode: 'cover',
   },
   centered: {
     flex: 1,
@@ -251,8 +295,10 @@ const styles = StyleSheet.create({
   prompt: {
     gap: 8,
   },
-  resultScroll: {
-    maxHeight: 300,
+  analyzing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   resultContent: {
     gap: 10,
@@ -276,6 +322,16 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.7,
+  },
+  secondaryButton: {
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1F7A4D',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 18,
   },
   text: {
     color: '#142116',
@@ -313,8 +369,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  overlayBody: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    lineHeight: 21,
+  },
   button: {
     color: '#FFFFFF',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  secondaryButtonText: {
+    color: '#1F7A4D',
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '700',
