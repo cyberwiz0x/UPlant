@@ -1,98 +1,336 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { analyzePlantPhoto } from '@/lib/api';
+import { PlantAnalysis } from '@/lib/mock-analysis';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+const EMPTY_TRACKERS = ['watering date', 'soil moisture', 'new yellowing', 'new brown edges'];
+
+export default function ScannerScreen() {
+  const cameraRef = useRef<CameraView>(null);
+  const [permission, requestPermission] = useCameraPermissions();
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<PlantAnalysis | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleAnalyze() {
+    if (!cameraRef.current || isAnalyzing) {
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setError(null);
+
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.75, base64: false });
+      if (!photo?.uri) {
+        throw new Error('Camera did not return a photo URI.');
+      }
+      const result = await analyzePlantPhoto(photo.uri);
+      setAnalysis(result);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Analysis failed.');
+    } finally {
+      setIsAnalyzing(false);
+    }
   }
-  if (Device.isDevice) {
+
+  if (!permission) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View style={styles.centered}>
+        <ActivityIndicator color="#1F7A4D" />
+      </View>
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={styles.permissionScreen}>
+        <View style={styles.permissionCopy}>
+          <TextBlock variant="eyebrow">UPlant</TextBlock>
+          <TextBlock variant="title">Camera access makes the demo real.</TextBlock>
+          <TextBlock>
+            Point your phone at a plant, capture a frame, then UPlant will identify the plant and
+            check visible leaf health.
+          </TextBlock>
+        </View>
+        <Pressable style={styles.primaryButton} onPress={requestPermission}>
+          <TextBlock variant="button">Enable camera</TextBlock>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+    <View style={styles.screen}>
+      <CameraView ref={cameraRef} facing="back" style={StyleSheet.absoluteFill} />
+      <View style={styles.scrim} />
+
+      <SafeAreaView style={styles.overlay}>
+        <View style={styles.header}>
+          <TextBlock variant="eyebrow">UPlant live scan</TextBlock>
+          <TextBlock variant="title">Frame a leaf clearly.</TextBlock>
+          <TextBlock>
+            Start with the whole plant, then move close to a leaf for the health check.
+          </TextBlock>
+        </View>
+
+        <View style={styles.focusGuide}>
+          <View style={[styles.corner, styles.cornerTopLeft]} />
+          <View style={[styles.corner, styles.cornerTopRight]} />
+          <View style={[styles.corner, styles.cornerBottomLeft]} />
+          <View style={[styles.corner, styles.cornerBottomRight]} />
+        </View>
+
+        <View style={styles.bottomPanel}>
+          {error ? <ErrorState message={error} /> : analysis ? <AnalysisResult analysis={analysis} /> : <ScanPrompt />}
+
+          <Pressable
+            style={[styles.primaryButton, isAnalyzing && styles.disabledButton]}
+            onPress={handleAnalyze}
+            disabled={isAnalyzing}>
+            {isAnalyzing ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <TextBlock variant="button">{analysis ? 'Scan again' : 'Identify and check health'}</TextBlock>
+            )}
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
-export default function HomeScreen() {
+function ScanPrompt() {
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <View style={styles.prompt}>
+      <TextBlock variant="sectionTitle">Ready for the first slice</TextBlock>
+      <TextBlock>
+        This screen captures a camera frame, sends it to the backend, identifies the plant with
+        Pl@ntNet, and returns starter leaf-care guidance.
+      </TextBlock>
+    </View>
+  );
+}
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+function ErrorState({ message }: { message: string }) {
+  return (
+    <View style={styles.prompt}>
+      <TextBlock variant="sectionTitle">Could not analyze yet</TextBlock>
+      <TextBlock>{message}</TextBlock>
+      <TextBlock variant="muted">Make sure the backend is running on your laptop.</TextBlock>
+    </View>
+  );
+}
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+function AnalysisResult({ analysis }: { analysis: PlantAnalysis }) {
+  return (
+    <ScrollView style={styles.resultScroll} contentContainerStyle={styles.resultContent}>
+      <View style={styles.resultHeader}>
+        <TextBlock variant="sectionTitle">{analysis.plant.commonName}</TextBlock>
+        <TextBlock variant="muted">
+          {analysis.plant.scientificName} - {Math.round(analysis.plant.confidence * 100)}% match
+        </TextBlock>
+      </View>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+      <View style={styles.statusRow}>
+        <TextBlock variant="pill">{analysis.health.status}</TextBlock>
+        <TextBlock variant="muted">{Math.round(analysis.health.confidence * 100)}% confidence</TextBlock>
+      </View>
+
+      <TextBlock variant="sectionTitle">{analysis.care.diagnosis}</TextBlock>
+      {analysis.care.fixes.map((fix) => (
+        <TextBlock key={fix}>- {fix}</TextBlock>
+      ))}
+
+      <TextBlock variant="sectionTitle">Track this week</TextBlock>
+      {(analysis.care.track.length ? analysis.care.track : EMPTY_TRACKERS).map((item) => (
+        <TextBlock key={item}>- {item}</TextBlock>
+      ))}
+    </ScrollView>
+  );
+}
+
+function TextBlock({
+  children,
+  variant = 'body',
+}: {
+  children: React.ReactNode;
+  variant?: 'body' | 'button' | 'eyebrow' | 'muted' | 'pill' | 'sectionTitle' | 'title';
+}) {
+  const textStyle = [styles.text, styles[variant]];
+  return (
+    <View style={variant === 'pill' ? styles.pillWrap : undefined}>
+      <Text style={textStyle}>{children}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
+    backgroundColor: '#07130D',
+  },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#F5FAF4',
+  },
+  permissionScreen: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: 24,
+    backgroundColor: '#F5FAF4',
+  },
+  permissionCopy: {
+    gap: 12,
+    paddingTop: 64,
+  },
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(2, 12, 7, 0.28)',
+  },
+  overlay: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: 20,
+  },
+  header: {
+    gap: 8,
+    paddingTop: 8,
+  },
+  focusGuide: {
+    alignSelf: 'center',
+    width: '74%',
+    maxWidth: 340,
+    aspectRatio: 0.78,
+  },
+  corner: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    borderColor: '#D9F99D',
+  },
+  cornerTopLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+  },
+  cornerTopRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+  },
+  cornerBottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+  },
+  cornerBottomRight: {
+    right: 0,
+    bottom: 0,
+    borderRightWidth: 4,
+    borderBottomWidth: 4,
+  },
+  bottomPanel: {
+    gap: 14,
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(250, 255, 248, 0.94)',
+  },
+  prompt: {
+    gap: 8,
+  },
+  resultScroll: {
+    maxHeight: 300,
+  },
+  resultContent: {
+    gap: 10,
+  },
+  resultHeader: {
+    gap: 2,
+  },
+  statusRow: {
     flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
     alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  heroSection: {
+  primaryButton: {
+    minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    borderRadius: 8,
+    backgroundColor: '#1F7A4D',
+    paddingHorizontal: 18,
+  },
+  disabledButton: {
+    opacity: 0.7,
+  },
+  text: {
+    color: '#142116',
+    fontSize: 15,
+    lineHeight: 21,
+    letterSpacing: 0,
+  },
+  body: {
+    color: '#142116',
+    fontSize: 15,
+    lineHeight: 21,
+    letterSpacing: 0,
   },
   title: {
-    textAlign: 'center',
+    color: '#FFFFFF',
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '700',
   },
-  code: {
+  eyebrow: {
+    color: '#D9F99D',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
     textTransform: 'uppercase',
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  sectionTitle: {
+    color: '#102015',
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: '700',
+  },
+  muted: {
+    color: '#536257',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  button: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  pillWrap: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: '#FFE8A3',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  pill: {
+    color: '#5D4212',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
 });
